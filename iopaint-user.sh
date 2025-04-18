@@ -32,6 +32,7 @@ LOCAL_FILES_ONLY=false
 DISABLE_NSFW_CHECKER=false
 
 # Input/output settings, a setting for file manager
+# See https://www.iopaint.com/file_manager
 INPUT=""          # Path to default input image or directory
 MASK_DIR=""       # Path to directory containing masks
 OUTPUT_DIR=""     # Path to output directory
