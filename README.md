@@ -23,3 +23,5 @@ To install reqiremenbts for plugins do the following:
 
 
 see iopaint-user.sh inside the repo for the usage.
+
+When enabling AMD you'll need to just use CPU as cuda is nvidia inside iopaint-user.sh, this contains the config and everything you may possibly need.
