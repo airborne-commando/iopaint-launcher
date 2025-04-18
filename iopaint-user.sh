@@ -31,7 +31,7 @@ LOCAL_FILES_ONLY=false
 # Safety settings
 DISABLE_NSFW_CHECKER=false
 
-# Input/output settings
+# Input/output settings, a setting for file manager
 INPUT=""          # Path to default input image or directory
 MASK_DIR=""       # Path to directory containing masks
 OUTPUT_DIR=""     # Path to output directory
