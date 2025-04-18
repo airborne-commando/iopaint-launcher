@@ -39,7 +39,13 @@ To install requirements for plugins do the following after running the script:
 
 * simply mv iopaint.sh as iopaint
 
-* Keep iopaint-user.sh as is.
+* Keep iopaint-user.sh as is, unless if you edit options.
+
+* Chown and chmod +x both scripts
+
+* ???
+
+* Profit
 
 
 see iopaint-user.sh inside the repo for the usage.
