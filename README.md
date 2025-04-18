@@ -30,6 +30,8 @@ To install requirements for plugins do the following after running the script:
 
     source ${HOME}/.iopaint_venv/bin/activate && pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/rocm5.6 && deactivate
 
+Remember to delete the venv before switching devices; read below.
+
 
 ## to remove the venv CAUTION! points to home $DIR:
 
