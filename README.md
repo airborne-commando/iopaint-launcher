@@ -2,7 +2,7 @@
 a launcher written in shell for IOpaint
 
 
-To install requirements for plugins do the following:
+To install requirements for plugins do the following after running the script:
 
     source ${HOME}/.iopaint_venv/bin/activate && pip3 install onnxruntime rembg && deactivate
 
