@@ -43,9 +43,26 @@ if [ ! -d "$VENV_DIR" ]; then
     
     pip install --upgrade pip
     pip install iopaint
+    
+    # Install plugin dependencies if needed
+    if [ "$ENABLE_REMOVE_BG" = true ] || [ "$ENABLE_ANIME_SEG" = true ] || [ "$ENABLE_INTERACTIVE_SEG" = true ]; then
+        echo "Installing plugin dependencies (onnxruntime, rembg)..."
+        pip install onnxruntime rembg
+    fi
+    
     deactivate
     echo "Virtual environment created and iopaint installed."
 fi
+
+# For existing environments, check if we need to install additional dependencies
+source "$VENV_DIR/bin/activate"
+if [ "$ENABLE_REMOVE_BG" = true ] || [ "$ENABLE_ANIME_SEG" = true ] || [ "$ENABLE_INTERACTIVE_SEG" = true ]; then
+    if ! pip show onnxruntime rembg &> /dev/null; then
+        echo "Installing missing plugin dependencies (onnxruntime, rembg)..."
+        pip install onnxruntime rembg
+    fi
+fi
+deactivate
 
 # Build the command
 CMD="iopaint start --model=\"$MODEL\" --device=\"$DEVICE\" --port=\"$PORT\" --host=\"$HOST\" --model-dir=\"$MODEL_DIR\" --quality=\"$QUALITY\""
