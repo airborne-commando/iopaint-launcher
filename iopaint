@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Main launcher script for IOPaint
+# This script handles the virtual environment and launches IOPaint with the user's configuration
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Source the user configuration file
+USER_CONFIG="${SCRIPT_DIR}/iopaint-user.sh"
+if [ ! -f "$USER_CONFIG" ]; then
+    echo "Error: User configuration file not found at $USER_CONFIG"
+    echo "Please create a configuration file by copying iopaint-user.example.sh to iopaint-user.sh"
+    exit 1
+fi
+source "$USER_CONFIG"
+
+# Check if Python 3.10 is available
+if ! command -v python3.10 &> /dev/null; then
+    echo "Python 3.10 is required but not installed."
+    exit 1
+fi
+
+# Create virtual environment if it doesn't exist
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment in $VENV_DIR..."
+    python3.10 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    echo "Installing PyTorch for $GPU_VENDOR..."
+    case "$GPU_VENDOR" in
+        nvidia)
+            pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
+            ;;
+        amd)
+            pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/rocm5.6
+            ;;
+        *)
+            echo "Installing default PyTorch (CPU version)"
+            pip3 install torch==2.1.2 torchvision==0.16.2
+            ;;
+    esac
+    
+    pip install --upgrade pip
+    pip install iopaint
+    deactivate
+    echo "Virtual environment created and iopaint installed."
+fi
+
+# Build the command
+CMD="iopaint start --model=\"$MODEL\" --device=\"$DEVICE\" --port=\"$PORT\" --host=\"$HOST\" --model-dir=\"$MODEL_DIR\" --quality=\"$QUALITY\""
+
+# Add boolean flags
+[ "$IN_BROWSER" = true ] && CMD="$CMD --inbrowser"
+[ "$LOW_MEM" = true ] && CMD="$CMD --low-mem"
+[ "$NO_HALF" = true ] && CMD="$CMD --no-half"
+[ "$CPU_OFFLOAD" = true ] && CMD="$CMD --cpu-offload"
+[ "$DISABLE_NSFW_CHECKER" = true ] && CMD="$CMD --disable-nsfw-checker"
+[ "$CPU_TEXTENCODER" = true ] && CMD="$CMD --cpu-textencoder"
+[ "$LOCAL_FILES_ONLY" = true ] && CMD="$CMD --local-files-only"
+[ "$ENABLE_INTERACTIVE_SEG" = true ] && CMD="$CMD --enable-interactive-seg"
+[ "$ENABLE_REMOVE_BG" = true ] && CMD="$CMD --enable-remove-bg"
+[ "$ENABLE_ANIME_SEG" = true ] && CMD="$CMD --enable-anime-seg"
+[ "$ENABLE_REALESRGAN" = true ] && CMD="$CMD --enable-realesrgan"
+[ "$ENABLE_GFPGAN" = true ] && CMD="$CMD --enable-gfpgan"
+[ "$ENABLE_RESTOREFORMER" = true ] && CMD="$CMD --enable-restoreformer"
+
+# Add other options
+[ -n "$INTERACTIVE_SEG_MODEL" ] && CMD="$CMD --interactive-seg-model=\"$INTERACTIVE_SEG_MODEL\""
+[ -n "$INTERACTIVE_SEG_DEVICE" ] && CMD="$CMD --interactive-seg-device=\"$INTERACTIVE_SEG_DEVICE\""
+[ -n "$REMOVE_BG_DEVICE" ] && CMD="$CMD --remove-bg-device=\"$REMOVE_BG_DEVICE\""
+[ -n "$REMOVE_BG_MODEL" ] && CMD="$CMD --remove-bg-model=\"$REMOVE_BG_MODEL\""
+[ -n "$REALESRGAN_DEVICE" ] && CMD="$CMD --realesrgan-device=\"$REALESRGAN_DEVICE\""
+[ -n "$REALESRGAN_MODEL" ] && CMD="$CMD --realesrgan-model=\"$REALESRGAN_MODEL\""
+[ -n "$GFPGAN_DEVICE" ] && CMD="$CMD --gfpgan-device=\"$GFPGAN_DEVICE\""
+[ -n "$RESTOREFORMER_DEVICE" ] && CMD="$CMD --restoreformer-device=\"$RESTOREFORMER_DEVICE\""
+[ -n "$INPUT" ] && CMD="$CMD --input=\"$INPUT\""
+[ -n "$MASK_DIR" ] && CMD="$CMD --mask-dir=\"$MASK_DIR\""
+[ -n "$OUTPUT_DIR" ] && CMD="$CMD --output-dir=\"$OUTPUT_DIR\""
+
+# Activate and run
+echo "Starting IOPaint with the following command:"
+echo "$CMD"
+source "$VENV_DIR/bin/activate"
+eval "$CMD"
+deactivate
