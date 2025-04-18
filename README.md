@@ -2,6 +2,12 @@
 a launcher written in shell for IOpaint
 
 
+See:
+
+https://www.iopaint.com/
+
+![IOPAINT Demo](https://www.youtube.com/watch?v=AvAvb_s_E6s)
+
 To install requirements for plugins do the following after running the script:
 
     source ${HOME}/.iopaint_venv/bin/activate && pip3 install onnxruntime rembg && deactivate
