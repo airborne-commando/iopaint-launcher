@@ -1,4 +1,4 @@
-# iopaint-launcher
+# IOpaint Launcher
 a launcher written in shell for IOpaint
 
 
