@@ -4,30 +4,431 @@
 # This script handles the virtual environment and launches IOPaint with the user's configuration
 
 # Get the directory where this script is located
+Help() {
+    echo "Usage: $0 [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  /?              Show this help message"
+    echo "  --edit-config   Edit the iopaint-user.sh configuration file, check the #comments"
+    echo "  --gpu VENDOR    Set GPU vendor for this session only (nvidia, amd, cpu)"
+    echo "  --set-perma-gpu VENDOR  Permanently set GPU vendor in config (nvidia, amd, cpu)"
+    echo "  --show-config   Show current configuration file location and GPU setting"
+    echo "  --download-config Download default configuration from official URL"
+    echo "  --web-config    Launch IOPaint with web configuration interface"
+    echo "  --import-web-config FILE  Import settings from web config JSON file"
+    echo "  --sync-config   Sync settings between shell config and web config"
+    echo
+    echo "Server Access:"
+    echo "  Web Config Interface: http://127.0.0.1:7860"
+    echo "  Main IOPaint Interface: http://127.0.0.1:8080"
+    echo
+    echo "GPU Vendors:"
+    echo "  nvidia  - Use NVIDIA GPU with CUDA"
+    echo "  amd     - Use AMD GPU with ROCm" 
+    echo "  cpu     - Use CPU only"
+    echo
+    echo "Configuration Management:"
+    echo "  Shell config: ~/.config/iopaint/iopaint-user.sh"
+    echo "  Web config:   ~/.config/iopaint/iopaint-config.json"
+    echo "  Use --sync-config to keep both configs in sync"
+    echo
+    exit 0
+}
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Source the user configuration file
-USER_CONFIG="${SCRIPT_DIR}/iopaint-user.sh"
+# Default configuration URL
+CONFIG_URL="https://gist.githubusercontent.com/airborne-commando/38d059e31274546e5bc9060516c735e9/raw/8e420885088c2f50f261b3f88d68b3d562063e53/iopaint-user.sh"
+
+# Parse command line arguments
+SESSION_GPU=""
+SET_PERMA_GPU=""
+SHOW_CONFIG=false
+EDIT_CONFIG=false
+DOWNLOAD_CONFIG=false
+WEB_CONFIG=false
+IMPORT_WEB_CONFIG=""
+SYNC_CONFIG=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        /\?)
+            Help
+            ;;
+        --edit-config)
+            EDIT_CONFIG=true
+            shift
+            ;;
+        --gpu)
+            SESSION_GPU="$2"
+            shift 2
+            ;;
+        --set-perma-gpu)
+            SET_PERMA_GPU="$2"
+            shift 2
+            ;;
+        --show-config)
+            SHOW_CONFIG=true
+            shift
+            ;;
+        --download-config)
+            DOWNLOAD_CONFIG=true
+            shift
+            ;;
+        --web-config)
+            WEB_CONFIG=true
+            shift
+            ;;
+        --import-web-config)
+            IMPORT_WEB_CONFIG="$2"
+            shift 2
+            ;;
+        --sync-config)
+            SYNC_CONFIG=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Determine config file location
+if [ -n "$XDG_CONFIG_HOME" ]; then
+    CONFIG_DIR="$XDG_CONFIG_HOME/iopaint"
+else
+    CONFIG_DIR="${HOME}/.config/iopaint"
+fi
+
+USER_CONFIG="$CONFIG_DIR/iopaint-user.sh"
+WEB_CONFIG_FILE="$CONFIG_DIR/iopaint-config.json"
+
+# Create config directory if it doesn't exist
+if [ ! -d "$CONFIG_DIR" ]; then
+    mkdir -p "$CONFIG_DIR"
+    echo "Created config directory: $CONFIG_DIR"
+fi
+
+# Function to convert JSON to shell variables
+json_to_shell() {
+    local json_file="$1"
+    
+    if [ ! -f "$json_file" ]; then
+        echo "❌ JSON file not found: $json_file"
+        return 1
+    fi
+    
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "❌ jq is required for JSON processing but not installed."
+        echo "Please install jq: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (macOS)"
+        return 1
+    fi
+    
+    echo "# Converted from JSON config: $(basename "$json_file")"
+    echo "# Generated on: $(date)"
+    echo ""
+    
+    # Map JSON keys to shell variable names
+    jq -r 'to_entries | .[] | select(.value != null) | 
+        (if .key == "no_half" then "NO_HALF"
+        elif .key == "low_mem" then "LOW_MEM" 
+        elif .key == "cpu_offload" then "CPU_OFFLOAD"
+        elif .key == "disable_nsfw_checker" then "DISABLE_NSFW_CHECKER"
+        elif .key == "local_files_only" then "LOCAL_FILES_ONLY"
+        elif .key == "cpu_textencoder" then "CPU_TEXTENCODER"
+        elif .key == "inbrowser" then "IN_BROWSER"
+        elif .key == "enable_interactive_seg" then "ENABLE_INTERACTIVE_SEG"
+        elif .key == "interactive_seg_model" then "INTERACTIVE_SEG_MODEL"
+        elif .key == "interactive_seg_device" then "INTERACTIVE_SEG_DEVICE"
+        elif .key == "enable_remove_bg" then "ENABLE_REMOVE_BG"
+        elif .key == "remove_bg_device" then "REMOVE_BG_DEVICE"
+        elif .key == "remove_bg_model" then "REMOVE_BG_MODEL"
+        elif .key == "enable_anime_seg" then "ENABLE_ANIME_SEG"
+        elif .key == "enable_realesrgan" then "ENABLE_REALESRGAN"
+        elif .key == "realesrgan_device" then "REALESRGAN_DEVICE"
+        elif .key == "realesrgan_model" then "REALESRGAN_MODEL"
+        elif .key == "enable_gfpgan" then "ENABLE_GFPGAN"
+        elif .key == "gfpgan_device" then "GFPGAN_DEVICE"
+        elif .key == "enable_restoreformer" then "ENABLE_RESTOREFORMER"
+        elif .key == "restoreformer_device" then "RESTOREFORMER_DEVICE"
+        elif .key == "model_dir" then "MODEL_DIR"
+        elif .key == "input" then "INPUT"
+        elif .key == "mask_dir" then "MASK_DIR"
+        elif .key == "output_dir" then "OUTPUT_DIR"
+        else .key | ascii_upcase end) + "=" + 
+        (if .value | type == "string" then "\"" + .value + "\"" 
+        else .value | tostring end)' "$json_file"
+}
+
+# Function to import web config to shell config
+import_web_config() {
+    local json_file="$1"
+    local shell_config="$2"
+    
+    if [ ! -f "$json_file" ]; then
+        echo "❌ Web config file not found: $json_file"
+        return 1
+    fi
+    
+    echo "Importing settings from: $json_file"
+    echo "Target shell config: $shell_config"
+    
+    # Create backup
+    cp "$shell_config" "$shell_config.bak.import.$(date +%Y%m%d_%H%M%S)"
+    
+    # Convert JSON to shell format
+    local converted_config
+    converted_config=$(json_to_shell "$json_file")
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to convert JSON to shell format"
+        return 1
+    fi
+    
+    # Create temporary file with merged config
+    local temp_config
+    temp_config=$(mktemp)
+    
+    # Copy existing shell config, preserving comments and GPU settings
+    {
+        # Copy everything until we hit variable definitions
+        grep -E '^[[:space:]]*#|^$' "$shell_config" || true
+        
+        echo ""
+        echo "# === Imported from web configuration ==="
+        echo "$converted_config"
+        echo ""
+        echo "# === Original GPU and core settings (preserved) ==="
+        
+        # Preserve GPU and core settings from original
+        grep -E '^(GPU_VENDOR|VENV_DIR|PORT|HOST|MODEL|DEVICE|QUALITY)=' "$shell_config" || true
+        
+        echo ""
+        echo "# === Other preserved settings ==="
+        
+        # Add any other settings that weren't in the JSON conversion
+        grep -E '^[A-Z_]+=' "$shell_config" | while read -r line; do
+            var_name=$(echo "$line" | cut -d'=' -f1)
+            if ! echo "$converted_config" | grep -q "^$var_name="; then
+                echo "$line"
+            fi
+        done
+        
+    } > "$temp_config"
+    
+    # Replace the original config
+    mv "$temp_config" "$shell_config"
+    
+    echo "✅ Successfully imported web configuration"
+    echo "💾 Backup created: $shell_config.bak.import.*"
+    echo "📝 Updated: $shell_config"
+    
+    return 0
+}
+
+# Function to sync configurations
+sync_configurations() {
+    local shell_config="$1"
+    local json_config="$2"
+    
+    echo "Syncing configurations..."
+    echo "Shell: $shell_config"
+    echo "JSON: $json_config"
+    
+    if [ ! -f "$shell_config" ]; then
+        echo "❌ Shell configuration not found"
+        return 1
+    fi
+    
+    if [ ! -f "$json_config" ]; then
+        echo "⚠️  JSON configuration not found, creating from shell config..."
+        # This would require shell-to-json conversion
+        echo "Currently only JSON-to-shell import is supported"
+        return 1
+    fi
+    
+    # For now, just import JSON to shell
+    import_web_config "$json_config" "$shell_config"
+}
+
+# Handle --import-web-config
+if [ -n "$IMPORT_WEB_CONFIG" ]; then
+    import_web_config "$IMPORT_WEB_CONFIG" "$USER_CONFIG"
+    exit $?
+fi
+
+# Handle --sync-config
+if [ "$SYNC_CONFIG" = true ]; then
+    sync_configurations "$USER_CONFIG" "$WEB_CONFIG_FILE"
+    exit $?
+fi
+
+# Handle --download-config
+if [ "$DOWNLOAD_CONFIG" = true ]; then
+    echo "Downloading default configuration from: $CONFIG_URL"
+    echo "Target: $USER_CONFIG"
+    
+    # Check for available download tools
+    if command -v curl &> /dev/null; then
+        if curl -fsSL "$CONFIG_URL" -o "$USER_CONFIG"; then
+            echo "✅ Successfully downloaded configuration using curl"
+            chmod +x "$USER_CONFIG"
+        else
+            echo "❌ Failed to download configuration using curl"
+            exit 1
+        fi
+    elif command -v wget &> /dev/null; then
+        if wget -q "$CONFIG_URL" -O "$USER_CONFIG"; then
+            echo "✅ Successfully downloaded configuration using wget"
+            chmod +x "$USER_CONFIG"
+        else
+            echo "❌ Failed to download configuration using wget"
+            exit 1
+        fi
+    else
+        echo "❌ Error: Neither curl nor wget is available for downloading"
+        echo "Please install curl or wget, or create the configuration manually"
+        exit 1
+    fi
+    
+    # Verify the download was successful
+    if [ -f "$USER_CONFIG" ] && [ -s "$USER_CONFIG" ]; then
+        echo "Configuration successfully downloaded to: $USER_CONFIG"
+        echo "You can now edit it with: $0 --edit-config"
+        echo ""
+        echo "To use the web configuration interface, run: $0 --web-config"
+        exit 0
+    else
+        echo "❌ Error: Downloaded file is empty or missing"
+        exit 1
+    fi
+fi
+
+# Copy default config if no user config exists
 if [ ! -f "$USER_CONFIG" ]; then
-    echo "Error: User configuration file not found at $USER_CONFIG"
-    echo "Please create a configuration file by copying iopaint-user.example.sh to iopaint-user.sh"
+    echo "No user configuration found at: $USER_CONFIG"
+    echo "You can:"
+    echo "  1. Run '$0 --download-config' to download the default configuration"
+    echo "  2. Run '$0 --edit-config' to create and edit a blank configuration"
+    echo "  3. Create the file manually at: $USER_CONFIG"
+    echo ""
+    read -p "Would you like to download the default configuration now? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Use self-call to download config
+        exec "$0" --download-config
+    else
+        echo "Please create a configuration file first."
+        exit 1
+    fi
+fi
+
+# Handle --show-config
+if [ "$SHOW_CONFIG" = true ]; then
+    echo "Configuration files:"
+    echo "  Shell: $USER_CONFIG"
+    echo "  Web:   $WEB_CONFIG_FILE"
+    echo ""
+    
+    if [ -f "$USER_CONFIG" ]; then
+        echo "Shell Config ($(wc -l < "$USER_CONFIG") lines):"
+        grep -E "^(PORT|HOST|MODEL|DEVICE|GPU_VENDOR)=" "$USER_CONFIG" || echo "Using defaults"
+        echo ""
+    fi
+    
+    if [ -f "$WEB_CONFIG_FILE" ]; then
+        echo "Web Config ($(wc -l < "$WEB_CONFIG_FILE") lines):"
+        if command -v jq &> /dev/null; then
+            jq -r '. | to_entries[] | "  \(.key): \(.value)"' "$WEB_CONFIG_FILE" | head -10
+            echo "  ... (use jq to see full content)"
+        else
+            echo "  Install jq to view JSON content properly"
+        fi
+    fi
+    
+    echo ""
+    echo "Access URLs:"
+    echo "  Web Config Interface: http://127.0.0.1:7860"
+    echo "  Main IOPaint Interface: http://127.0.0.1:8080"
+    echo ""
+    echo "Management commands:"
+    echo "  $0 --import-web-config $WEB_CONFIG_FILE"
+    echo "  $0 --sync-config"
+    exit 0
+fi
+
+# Handle --edit-config
+if [ "$EDIT_CONFIG" = true ]; then
+    ${EDITOR:-nano} "$USER_CONFIG"
+    exit 0
+fi
+
+# Source the user configuration file
+if ! source "$USER_CONFIG"; then
+    echo "❌ Error: Failed to load configuration file: $USER_CONFIG"
+    echo "The file may contain syntax errors. Please check or download a fresh copy with:"
+    echo "  $0 --download-config"
     exit 1
 fi
-source "$USER_CONFIG"
+
+# Handle permanent GPU setting
+if [ -n "$SET_PERMA_GPU" ]; then
+    case $SET_PERMA_GPU in
+        nvidia|amd|cpu)
+            # Create backup
+            cp "$USER_CONFIG" "$USER_CONFIG.bak.$(date +%Y%m%d_%H%M%S)"
+            
+            if grep -q "GPU_VENDOR=" "$USER_CONFIG"; then
+                # Update existing GPU_VENDOR line
+                sed -i "s/GPU_VENDOR=.*/GPU_VENDOR=\"$SET_PERMA_GPU\"/" "$USER_CONFIG"
+            else
+                # Add GPU_VENDOR line after the first comments
+                sed -i "0,/^[^#]/s//GPU_VENDOR=\"$SET_PERMA_GPU\"\n&/" "$USER_CONFIG"
+            fi
+            
+            echo "✅ Permanently set GPU vendor to: $SET_PERMA_GPU"
+            echo "📁 Configuration updated in: $USER_CONFIG"
+            echo "💾 Backup saved as: $USER_CONFIG.bak.*"
+            
+            # Reload the updated config
+            source "$USER_CONFIG"
+            ;;
+        *)
+            echo "❌ Error: Invalid GPU vendor. Use: nvidia, amd, or cpu"
+            exit 1
+            ;;
+    esac
+fi
+
+# Handle session GPU override
+if [ -n "$SESSION_GPU" ]; then
+    case $SESSION_GPU in
+        nvidia|amd|cpu)
+            echo "🔧 Using GPU vendor for this session: $SESSION_GPU"
+            GPU_VENDOR="$SESSION_GPU"
+            ;;
+        *)
+            echo "❌ Error: Invalid GPU vendor. Use: nvidia, amd, or cpu"
+            exit 1
+            ;;
+    esac
+fi
 
 # Check if Python 3.10 is available
 if ! command -v python3.10 &> /dev/null; then
-    echo "Python 3.10 is required but not installed."
+    echo "❌ Python 3.10 is required but not installed."
     exit 1
 fi
 
 # Create virtual environment if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment in $VENV_DIR..."
+    echo "🐍 Creating virtual environment in $VENV_DIR..."
+    echo "🎮 Using GPU vendor: $GPU_VENDOR"
     python3.10 -m venv "$VENV_DIR"
     source "$VENV_DIR/bin/activate"
     
-    echo "Installing PyTorch for $GPU_VENDOR..."
+    echo "📦 Installing PyTorch for $GPU_VENDOR..."
     case "$GPU_VENDOR" in
         nvidia)
             pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
@@ -35,7 +436,7 @@ if [ ! -d "$VENV_DIR" ]; then
         amd)
             pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/rocm5.6
             ;;
-        *)
+        cpu|*)
             echo "Installing default PyTorch (CPU version)"
             pip3 install torch==2.1.2 torchvision==0.16.2
             ;;
@@ -46,58 +447,98 @@ if [ ! -d "$VENV_DIR" ]; then
     
     # Install plugin dependencies if needed
     if [ "$ENABLE_REMOVE_BG" = true ] || [ "$ENABLE_ANIME_SEG" = true ] || [ "$ENABLE_INTERACTIVE_SEG" = true ]; then
-        echo "Installing plugin dependencies (onnxruntime, rembg)..."
+        echo "🔌 Installing plugin dependencies (onnxruntime, rembg)..."
         pip install onnxruntime rembg
     fi
     
+    # Install jq for JSON processing if not available
+    if ! command -v jq &> /dev/null; then
+        echo "📦 Installing jq for JSON processing..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq
+        elif command -v brew &> /dev/null; then
+            brew install jq
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y jq
+        else
+            echo "⚠️  Please install jq manually for JSON config support"
+        fi
+    fi
+    
     deactivate
-    echo "Virtual environment created and iopaint installed."
+    echo "✅ Virtual environment created and iopaint installed."
 fi
 
 # For existing environments, check if we need to install additional dependencies
 source "$VENV_DIR/bin/activate"
 if [ "$ENABLE_REMOVE_BG" = true ] || [ "$ENABLE_ANIME_SEG" = true ] || [ "$ENABLE_INTERACTIVE_SEG" = true ]; then
     if ! pip show onnxruntime rembg &> /dev/null; then
-        echo "Installing missing plugin dependencies (onnxruntime, rembg)..."
+        echo "🔌 Installing missing plugin dependencies (onnxruntime, rembg)..."
         pip install onnxruntime rembg
     fi
 fi
 deactivate
 
-# Build the command
-CMD="iopaint start --model=\"$MODEL\" --device=\"$DEVICE\" --port=\"$PORT\" --host=\"$HOST\" --model-dir=\"$MODEL_DIR\" --quality=\"$QUALITY\""
+# Build the command based on whether web config is requested
+if [ "$WEB_CONFIG" = true ]; then
+    echo "🌐 Starting IOPaint with web configuration interface..."
+    CMD="iopaint start-web-config --config-file \"$WEB_CONFIG_FILE\""
+    WEB_CONFIG_PORT=7860
+else
+    # Build the standard command
+    CMD="iopaint start --model=\"$MODEL\" --device=\"$DEVICE\" --port=\"$PORT\" --host=\"$HOST\" --model-dir=\"$MODEL_DIR\" --quality=\"$QUALITY\""
 
-# Add boolean flags
-[ "$IN_BROWSER" = true ] && CMD="$CMD --inbrowser"
-[ "$LOW_MEM" = true ] && CMD="$CMD --low-mem"
-[ "$NO_HALF" = true ] && CMD="$CMD --no-half"
-[ "$CPU_OFFLOAD" = true ] && CMD="$CMD --cpu-offload"
-[ "$DISABLE_NSFW_CHECKER" = true ] && CMD="$CMD --disable-nsfw-checker"
-[ "$CPU_TEXTENCODER" = true ] && CMD="$CMD --cpu-textencoder"
-[ "$LOCAL_FILES_ONLY" = true ] && CMD="$CMD --local-files-only"
-[ "$ENABLE_INTERACTIVE_SEG" = true ] && CMD="$CMD --enable-interactive-seg"
-[ "$ENABLE_REMOVE_BG" = true ] && CMD="$CMD --enable-remove-bg"
-[ "$ENABLE_ANIME_SEG" = true ] && CMD="$CMD --enable-anime-seg"
-[ "$ENABLE_REALESRGAN" = true ] && CMD="$CMD --enable-realesrgan"
-[ "$ENABLE_GFPGAN" = true ] && CMD="$CMD --enable-gfpgan"
-[ "$ENABLE_RESTOREFORMER" = true ] && CMD="$CMD --enable-restoreformer"
+    # Add boolean flags
+    [ "$IN_BROWSER" = true ] && CMD="$CMD --inbrowser"
+    [ "$LOW_MEM" = true ] && CMD="$CMD --low-mem"
+    [ "$NO_HALF" = true ] && CMD="$CMD --no-half"
+    [ "$CPU_OFFLOAD" = true ] && CMD="$CMD --cpu-offload"
+    [ "$DISABLE_NSFW_CHECKER" = true ] && CMD="$CMD --disable-nsfw-checker"
+    [ "$CPU_TEXTENCODER" = true ] && CMD="$CMD --cpu-textencoder"
+    [ "$LOCAL_FILES_ONLY" = true ] && CMD="$CMD --local-files-only"
+    [ "$ENABLE_INTERACTIVE_SEG" = true ] && CMD="$CMD --enable-interactive-seg"
+    [ "$ENABLE_REMOVE_BG" = true ] && CMD="$CMD --enable-remove-bg"
+    [ "$ENABLE_ANIME_SEG" = true ] && CMD="$CMD --enable-anime-seg"
+    [ "$ENABLE_REALESRGAN" = true ] && CMD="$CMD --enable-realesrgan"
+    [ "$ENABLE_GFPGAN" = true ] && CMD="$CMD --enable-gfpgan"
+    [ "$ENABLE_RESTOREFORMER" = true ] && CMD="$CMD --enable-restoreformer"
 
-# Add other options
-[ -n "$INTERACTIVE_SEG_MODEL" ] && CMD="$CMD --interactive-seg-model=\"$INTERACTIVE_SEG_MODEL\""
-[ -n "$INTERACTIVE_SEG_DEVICE" ] && CMD="$CMD --interactive-seg-device=\"$INTERACTIVE_SEG_DEVICE\""
-[ -n "$REMOVE_BG_DEVICE" ] && CMD="$CMD --remove-bg-device=\"$REMOVE_BG_DEVICE\""
-[ -n "$REMOVE_BG_MODEL" ] && CMD="$CMD --remove-bg-model=\"$REMOVE_BG_MODEL\""
-[ -n "$REALESRGAN_DEVICE" ] && CMD="$CMD --realesrgan-device=\"$REALESRGAN_DEVICE\""
-[ -n "$REALESRGAN_MODEL" ] && CMD="$CMD --realesrgan-model=\"$REALESRGAN_MODEL\""
-[ -n "$GFPGAN_DEVICE" ] && CMD="$CMD --gfpgan-device=\"$GFPGAN_DEVICE\""
-[ -n "$RESTOREFORMER_DEVICE" ] && CMD="$CMD --restoreformer-device=\"$RESTOREFORMER_DEVICE\""
-[ -n "$INPUT" ] && CMD="$CMD --input=\"$INPUT\""
-[ -n "$MASK_DIR" ] && CMD="$CMD --mask-dir=\"$MASK_DIR\""
-[ -n "$OUTPUT_DIR" ] && CMD="$CMD --output-dir=\"$OUTPUT_DIR\""
+    # Add other options
+    [ -n "$INTERACTIVE_SEG_MODEL" ] && CMD="$CMD --interactive-seg-model=\"$INTERACTIVE_SEG_MODEL\""
+    [ -n "$INTERACTIVE_SEG_DEVICE" ] && CMD="$CMD --interactive-seg-device=\"$INTERACTIVE_SEG_DEVICE\""
+    [ -n "$REMOVE_BG_DEVICE" ] && CMD="$CMD --remove-bg-device=\"$REMOVE_BG_DEVICE\""
+    [ -n "$REMOVE_BG_MODEL" ] && CMD="$CMD --remove-bg-model=\"$REMOVE_BG_MODEL\""
+    [ -n "$REALESRGAN_DEVICE" ] && CMD="$CMD --realesrgan-device=\"$REALESRGAN_DEVICE\""
+    [ -n "$REALESRGAN_MODEL" ] && CMD="$CMD --realesrgan-model=\"$REALESRGAN_MODEL\""
+    [ -n "$GFPGAN_DEVICE" ] && CMD="$CMD --gfpgan-device=\"$GFPGAN_DEVICE\""
+    [ -n "$RESTOREFORMER_DEVICE" ] && CMD="$CMD --restoreformer-device=\"$RESTOREFORMER_DEVICE\""
+    [ -n "$INPUT" ] && CMD="$CMD --input=\"$INPUT\""
+    [ -n "$MASK_DIR" ] && CMD="$CMD --mask-dir=\"$MASK_DIR\""
+    [ -n "$OUTPUT_DIR" ] && CMD="$CMD --output-dir=\"$OUTPUT_DIR\""
+fi
+
+# Display access information
+echo ""
+if [ "$WEB_CONFIG" = true ]; then
+    echo "🌐 Web Configuration Interface: http://127.0.0.1:7860"
+    echo "   This allows you to configure IOPaint through a web browser"
+else
+    echo "🌐 Main IOPaint Interface: http://$HOST:$PORT"
+    echo "   Web Config also available at: http://127.0.0.1:7860"
+fi
+
+echo ""
+echo "💡 After configuring in web interface, import settings with:"
+echo "   $0 --import-web-config $WEB_CONFIG_FILE"
 
 # Activate and run
-echo "Starting IOPaint with the following command:"
-echo "$CMD"
+echo ""
+echo "🚀 Starting IOPaint with GPU vendor: $GPU_VENDOR"
+echo "📁 Shell Config: $USER_CONFIG"
+if [ "$WEB_CONFIG" = true ]; then
+    echo "📄 Web Config File: $WEB_CONFIG_FILE"
+fi
+echo "🔧 Command: $CMD"
 source "$VENV_DIR/bin/activate"
 eval "$CMD"
 deactivate
