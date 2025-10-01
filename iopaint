@@ -18,14 +18,14 @@ Help() {
     echo "  --import-web-config FILE  Import settings from web config JSON file"
     echo "  --sync-config   Sync settings between shell config and web config"
     echo
-    echo "Server Access:"
-    echo "  Web Config Interface: http://127.0.0.1:7860"
-    echo "  Main IOPaint Interface: http://127.0.0.1:8080"
-    echo
     echo "GPU Vendors:"
     echo "  nvidia  - Use NVIDIA GPU with CUDA"
     echo "  amd     - Use AMD GPU with ROCm" 
     echo "  cpu     - Use CPU only"
+    echo
+    echo "Server Access:"
+    echo "  Web Config Interface: http://127.0.0.1:7860"
+    echo "  Main IOPaint Interface: http://127.0.0.1:8080"
     echo
     echo "Configuration Management:"
     echo "  Shell config: ~/.config/iopaint/iopaint-user.sh"
@@ -93,6 +93,77 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Function to get device setting based on GPU vendor
+get_device_setting() {
+    local vendor="$1"
+    case "$vendor" in
+        nvidia)
+            echo "cuda"
+            ;;
+        amd|cpu|*)
+            echo "cpu"
+            ;;
+    esac
+}
+
+# Function to update device settings in shell config
+update_device_settings() {
+    local shell_config="$1"
+    local gpu_vendor="$2"
+    local device_setting=$(get_device_setting "$gpu_vendor")
+    
+    echo "🔄 Updating device settings for GPU vendor: $gpu_vendor"
+    echo "📝 Setting all devices to: $device_setting"
+    
+    # Create backup
+    cp "$shell_config" "$shell_config.bak.device.$(date +%Y%m%d_%H%M%S)"
+    
+    # Update device settings
+    sed -i "s/^DEVICE=.*/DEVICE=\"$device_setting\"  # cpu, cuda, or mps/" "$shell_config"
+    sed -i "s/^INTERACTIVE_SEG_DEVICE=.*/INTERACTIVE_SEG_DEVICE=\"$device_setting\"/" "$shell_config"
+    sed -i "s/^REMOVE_BG_DEVICE=.*/REMOVE_BG_DEVICE=\"$device_setting\"/" "$shell_config"
+    sed -i "s/^REALESRGAN_DEVICE=.*/REALESRGAN_DEVICE=\"$device_setting\"/" "$shell_config"
+    sed -i "s/^GFPGAN_DEVICE=.*/GFPGAN_DEVICE=\"$device_setting\"/" "$shell_config"
+    sed -i "s/^RESTOREFORMER_DEVICE=.*/RESTOREFORMER_DEVICE=\"$device_setting\"/" "$shell_config"
+    
+    echo "✅ Device settings updated for $gpu_vendor"
+}
+
+# Function to update device settings in JSON config
+update_json_device_settings() {
+    local json_config="$1"
+    local gpu_vendor="$2"
+    local device_setting=$(get_device_setting "$gpu_vendor")
+    
+    if [ ! -f "$json_config" ]; then
+        echo "⚠️  JSON config not found, skipping device update: $json_config"
+        return 0
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        echo "⚠️  jq not available, skipping JSON device update"
+        return 1
+    fi
+    
+    echo "🔄 Updating JSON device settings for GPU vendor: $gpu_vendor"
+    echo "📝 Setting all devices to: $device_setting"
+    
+    # Create backup
+    cp "$json_config" "$json_config.bak.device.$(date +%Y%m%d_%H%M%S)"
+    
+    # Update device settings in JSON
+    jq --arg device "$device_setting" '
+        .device = $device |
+        .interactive_seg_device = $device |
+        .remove_bg_device = $device |
+        .realesrgan_device = $device |
+        .gfpgan_device = $device |
+        .restoreformer_device = $device
+    ' "$json_config" > "${json_config}.tmp" && mv "${json_config}.tmp" "$json_config"
+    
+    echo "✅ JSON device settings updated for $gpu_vendor"
+}
+
 # Determine config file location
 if [ -n "$XDG_CONFIG_HOME" ]; then
     CONFIG_DIR="$XDG_CONFIG_HOME/iopaint"
@@ -125,11 +196,7 @@ json_to_shell() {
         return 1
     fi
     
-    echo "# Converted from JSON config: $(basename "$json_file")"
-    echo "# Generated on: $(date)"
-    echo ""
-    
-    # Map JSON keys to shell variable names
+    # Map JSON keys to shell variable names with proper formatting
     jq -r 'to_entries | .[] | select(.value != null) | 
         (if .key == "no_half" then "NO_HALF"
         elif .key == "low_mem" then "LOW_MEM" 
@@ -156,6 +223,11 @@ json_to_shell() {
         elif .key == "input" then "INPUT"
         elif .key == "mask_dir" then "MASK_DIR"
         elif .key == "output_dir" then "OUTPUT_DIR"
+        elif .key == "host" then "HOST"
+        elif .key == "port" then "PORT"
+        elif .key == "model" then "MODEL"
+        elif .key == "device" then "DEVICE"
+        elif .key == "quality" then "QUALITY"
         else .key | ascii_upcase end) + "=" + 
         (if .value | type == "string" then "\"" + .value + "\"" 
         else .value | tostring end)' "$json_file"
@@ -186,34 +258,27 @@ import_web_config() {
         return 1
     fi
     
-    # Create temporary file with merged config
+    # Create temporary file with clean config
     local temp_config
     temp_config=$(mktemp)
     
-    # Copy existing shell config, preserving comments and GPU settings
     {
-        # Copy everything until we hit variable definitions
-        grep -E '^[[:space:]]*#|^$' "$shell_config" || true
+        echo "#!/bin/bash"
+        echo ""
+        echo "# User configuration file for IOPaint"
+        echo "# Web configuration imported on: $(date)"
+        echo ""
+        
+        # Always preserve GPU_VENDOR and VENV_DIR from original
+        grep -E "^(GPU_VENDOR|VENV_DIR)=" "$shell_config" || cat << 'EOF'
+GPU_VENDOR="cpu"  # nvidia, amd, or cpu
+VENV_DIR="${HOME}/.iopaint_venv"
+EOF
         
         echo ""
-        echo "# === Imported from web configuration ==="
-        echo "$converted_config"
-        echo ""
-        echo "# === Original GPU and core settings (preserved) ==="
         
-        # Preserve GPU and core settings from original
-        grep -E '^(GPU_VENDOR|VENV_DIR|PORT|HOST|MODEL|DEVICE|QUALITY)=' "$shell_config" || true
-        
-        echo ""
-        echo "# === Other preserved settings ==="
-        
-        # Add any other settings that weren't in the JSON conversion
-        grep -E '^[A-Z_]+=' "$shell_config" | while read -r line; do
-            var_name=$(echo "$line" | cut -d'=' -f1)
-            if ! echo "$converted_config" | grep -q "^$var_name="; then
-                echo "$line"
-            fi
-        done
+        # Use all converted config except GPU/VENV settings
+        echo "$converted_config" | grep -v -E "^(GPU_VENDOR|VENV_DIR)="
         
     } > "$temp_config"
     
@@ -333,15 +398,16 @@ if [ "$SHOW_CONFIG" = true ]; then
     
     if [ -f "$USER_CONFIG" ]; then
         echo "Shell Config ($(wc -l < "$USER_CONFIG") lines):"
-        grep -E "^(PORT|HOST|MODEL|DEVICE|GPU_VENDOR)=" "$USER_CONFIG" || echo "Using defaults"
+        echo "GPU Vendor: $(grep '^GPU_VENDOR=' "$USER_CONFIG" | cut -d'=' -f2 | tr -d '"' || echo 'not set')"
+        echo "Device: $(grep '^DEVICE=' "$USER_CONFIG" | cut -d'=' -f2 | tr -d '"' || echo 'not set')"
         echo ""
     fi
     
     if [ -f "$WEB_CONFIG_FILE" ]; then
         echo "Web Config ($(wc -l < "$WEB_CONFIG_FILE") lines):"
         if command -v jq &> /dev/null; then
-            jq -r '. | to_entries[] | "  \(.key): \(.value)"' "$WEB_CONFIG_FILE" | head -10
-            echo "  ... (use jq to see full content)"
+            echo "Device: $(jq -r '.device // "not set"' "$WEB_CONFIG_FILE")"
+            jq -r '. | to_entries[] | select(.key | test("device")) | "  \(.key): \(.value)"' "$WEB_CONFIG_FILE"
         else
             echo "  Install jq to view JSON content properly"
         fi
@@ -388,6 +454,15 @@ if [ -n "$SET_PERMA_GPU" ]; then
             fi
             
             echo "✅ Permanently set GPU vendor to: $SET_PERMA_GPU"
+            
+            # Update all device settings for the new GPU vendor
+            update_device_settings "$USER_CONFIG" "$SET_PERMA_GPU"
+            
+            # Also update JSON config if it exists
+            if [ -f "$WEB_CONFIG_FILE" ]; then
+                update_json_device_settings "$WEB_CONFIG_FILE" "$SET_PERMA_GPU"
+            fi
+            
             echo "📁 Configuration updated in: $USER_CONFIG"
             echo "💾 Backup saved as: $USER_CONFIG.bak.*"
             
@@ -407,6 +482,18 @@ if [ -n "$SESSION_GPU" ]; then
         nvidia|amd|cpu)
             echo "🔧 Using GPU vendor for this session: $SESSION_GPU"
             GPU_VENDOR="$SESSION_GPU"
+            
+            # Override device settings for this session
+            DEVICE_SETTING=$(get_device_setting "$SESSION_GPU")
+            echo "📝 Setting all devices to: $DEVICE_SETTING for this session"
+            
+            # Override the device variables
+            DEVICE="$DEVICE_SETTING"
+            INTERACTIVE_SEG_DEVICE="$DEVICE_SETTING"
+            REMOVE_BG_DEVICE="$DEVICE_SETTING"
+            REALESRGAN_DEVICE="$DEVICE_SETTING"
+            GFPGAN_DEVICE="$DEVICE_SETTING"
+            RESTOREFORMER_DEVICE="$DEVICE_SETTING"
             ;;
         *)
             echo "❌ Error: Invalid GPU vendor. Use: nvidia, amd, or cpu"
