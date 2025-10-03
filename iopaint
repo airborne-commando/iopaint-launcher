@@ -1,234 +1,142 @@
 #!/bin/bash
 
-# Main launcher script for IOPaint
-# This script handles the virtual environment and launches IOPaint with JSON configuration
+set -e
 
-# Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-# Configuration directory
 CONFIG_DIR="${HOME}/.config/iopaint"
-JSON_CONFIG="${CONFIG_DIR}/iopaint-config.json"
+USER_CONFIG="${CONFIG_DIR}/iopaint-user.sh"
+DEFAULT_CONFIG_URL="https://raw.githubusercontent.com/airborne-commando/iopaint-launcher/refs/heads/main/iopaint-user.sh"
 
-# Virtual environment directory
-VENV_DIR="${HOME}/.iopaint_venv"
-
-# GPU configuration
-GPU_CONFIG="${CONFIG_DIR}/gpu-type"
-
-# Ensure config directory exists
+# Create config directory if it doesn't exist
 mkdir -p "$CONFIG_DIR"
 
-# Function to detect and select GPU type
-select_gpu_type() {
-    # Check if GPU type is already configured
-    if [ -f "$GPU_CONFIG" ]; then
-        GPU_TYPE=$(cat "$GPU_CONFIG")
-        echo "Using previously configured GPU type: $GPU_TYPE"
-        return 0
-    fi
-
-    echo "GPU Configuration"
-    echo "================="
-    
-    # Auto-detect available GPUs
-    AUTO_DETECT=""
-    if command -v nvidia-smi &> /dev/null; then
-        AUTO_DETECT="NVIDIA GPU detected"
-        DEFAULT=1
-    elif lspci | grep -i amd/ati | grep -i vga &> /dev/null; then
-        AUTO_DETECT="AMD GPU detected"
-        DEFAULT=2
-    else
-        AUTO_DETECT="No dedicated GPU detected"
-        DEFAULT=3
-    fi
-
-    echo "Auto-detection: $AUTO_DETECT"
-    echo ""
-    echo "Please select your GPU type:"
-    echo "1) NVIDIA (CUDA)"
-    echo "2) AMD (ROCm)" 
-    echo "3) CPU only"
-    echo "4) Auto-detect ($AUTO_DETECT)"
-    echo ""
-    
-    while true; do
-        read -p "Enter your choice [1-4] (default: $DEFAULT): " choice
-        choice=${choice:-$DEFAULT}
-        
-        case $choice in
-            1)
-                GPU_TYPE="nvidia"
-                echo "Selected: NVIDIA (CUDA)"
-                break
-                ;;
-            2)
-                GPU_TYPE="amd"
-                echo "Selected: AMD (ROCm)"
-                break
-                ;;
-            3)
-                GPU_TYPE="cpu"
-                echo "Selected: CPU only"
-                break
-                ;;
-            4)
-                # Use auto-detection
-                if command -v nvidia-smi &> /dev/null; then
-                    GPU_TYPE="nvidia"
-                    echo "Auto-selected: NVIDIA (CUDA)"
-                elif lspci | grep -i amd/ati | grep -i vga &> /dev/null; then
-                    GPU_TYPE="amd"
-                    echo "Auto-selected: AMD (ROCm)"
-                else
-                    GPU_TYPE="cpu"
-                    echo "Auto-selected: CPU only"
-                fi
-                break
-                ;;
-            *)
-                echo "Invalid choice. Please enter 1, 2, 3, or 4."
-                ;;
-        esac
-    done
-
-    # Save the selection
-    echo "$GPU_TYPE" > "$GPU_CONFIG"
-    echo "GPU configuration saved to $GPU_CONFIG"
-    echo ""
-}
-
-# Function to setup virtual environment
-setup_venv() {
-    # Check if Python 3.10 is available
-    if ! command -v python3.10 &> /dev/null; then
-        echo "Python 3.10 is required but not installed."
-        exit 1
-    fi
-
-    # Select GPU type if not already done
-    select_gpu_type
-
-    # Create virtual environment if it doesn't exist
-    if [ ! -d "$VENV_DIR" ]; then
-        echo "Creating virtual environment in $VENV_DIR..."
-        python3.10 -m venv "$VENV_DIR"
-        source "$VENV_DIR/bin/activate"
-        
-        # Install PyTorch based on GPU selection
-        case "$GPU_TYPE" in
-            nvidia)
-                echo "Installing PyTorch with CUDA support..."
-                pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
-                ;;
-            amd)
-                echo "Installing PyTorch with ROCm support..."
-                pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/rocm5.6
-                ;;
-            cpu|*)
-                echo "Installing CPU-only PyTorch."
-                pip3 install torch==2.1.2 torchvision==0.16.2
-                ;;
-        esac
-        
-        pip install --upgrade pip
-        pip install iopaint
-        
-        # Install common plugin dependencies
-        echo "Installing common plugin dependencies..."
-        pip install onnxruntime rembg
-        
-        deactivate
-        echo "Virtual environment created and iopaint installed."
-    else
-        # For existing environments, ensure plugin dependencies are installed
-        source "$VENV_DIR/bin/activate"
-        if ! pip show onnxruntime rembg &> /dev/null; then
-            echo "Installing missing plugin dependencies..."
-            pip install onnxruntime rembg
-        fi
-        deactivate
-    fi
-}
-
-# Function to regenerate GPU configuration
-regenerate_gpu_config() {
-    echo "Regenerating GPU configuration..."
-    rm -f "$GPU_CONFIG"
-    select_gpu_type
-    echo "GPU configuration updated. Please run the setup again to reinstall with the new GPU type."
-}
-
-# Function to generate configuration web interface
-generate_config() {
-    echo "Starting IOPaint configuration web interface..."
-    
-    # Ensure virtual environment is set up
-    setup_venv
-    
-    source "$VENV_DIR/bin/activate"
-    
-    # Build the command for generating config
-    CMD="iopaint start-web-config --config-file \"$JSON_CONFIG\""
-    
-    echo "Starting configuration interface with command:"
-    echo "$CMD"
-    eval "$CMD"
-    
-    deactivate
-}
-
-# Function to start IOPaint with JSON config
-start_with_json_config() {
-    if [ ! -f "$JSON_CONFIG" ]; then
-        echo "JSON configuration file not found at $JSON_CONFIG"
-        echo "Please generate one first using: $0 --gen-config"
-        exit 1
-    fi
-    
-    echo "Starting IOPaint with JSON configuration..."
-    source "$VENV_DIR/bin/activate"
-    CMD="iopaint start --config \"$JSON_CONFIG\""
-    echo "Running: $CMD"
-    eval "$CMD"
-    deactivate
-}
-
-# Handle command line arguments
-case "${1:-}" in
-    "--gen-config")
-        generate_config
-        exit 0
-        ;;
-    "--gpu-setup")
-        regenerate_gpu_config
-        exit 0
-        ;;
-    "--help"|"-h")
-        echo "IOPaint Launcher"
-        echo ""
-        echo "Usage: $0 [OPTION]"
-        echo ""
-        echo "Options:"
-        echo "  (no option)        Start IOPaint with iopaint-config.json configuration"
-        echo "  --gen-config       Generate configuration via web interface"
-        echo "  --gpu-setup        Reconfigure GPU settings"
-        echo "  --help, -h         Show this help message"
-        exit 0
-        ;;
-esac
-
-# Default startup behavior - use JSON config directly
-if [ ! -f "$JSON_CONFIG" ]; then
-    echo "JSON configuration file not found at $JSON_CONFIG"
-    echo "Creating default configuration using web interface..."
-    generate_config
-    exit 0
+# Step 1: Ensure config file exists and is edited BEFORE using/creating the virtual env
+if [ ! -f "$USER_CONFIG" ]; then
+  echo "Configuration file not found: $USER_CONFIG"
+  echo "Attempting to download the default configuration file..."
+  curl -fsSL "$DEFAULT_CONFIG_URL" -o "$USER_CONFIG"
+  if [ $? -ne 0 ]; then
+    echo "Failed to download default iopaint-user.sh."
+    exit 1
+  fi
+  echo "Opening configuration for editing..."
+  ${EDITOR:-nano} "$USER_CONFIG"
+else
+  echo "Opening configuration for editing..."
+  ${EDITOR:-nano} "$USER_CONFIG"
 fi
 
-# Ensure virtual environment is set up
-setup_venv
+# Step 2: Source config values fresh from editing
+source "$USER_CONFIG"
 
-# Start IOPaint directly with JSON configuration
-start_with_json_config
+VENV_DIR="${HOME}/.iopaint_venv"
+LAST_GPU_VENDOR_FILE="${VENV_DIR}/.last_gpu_vendor"
+
+# Step 3: If GPU_VENDOR changed, remove the venv to avoid device mismatches
+if [ -d "$VENV_DIR" ]; then
+  if [ -f "$LAST_GPU_VENDOR_FILE" ]; then
+    LAST_GPU_VENDOR=$(cat "$LAST_GPU_VENDOR_FILE")
+  else
+    LAST_GPU_VENDOR=""
+  fi
+
+  if [ "$LAST_GPU_VENDOR" != "$GPU_VENDOR" ]; then
+    echo "GPU_VENDOR changed from '$LAST_GPU_VENDOR' to '$GPU_VENDOR'."
+    echo "Deleting existing virtual environment to reflect device change..."
+    rm -rf "$VENV_DIR"
+  fi
+fi
+
+# Step 4: Create venv if missing, install appropriate PyTorch based on GPU vendor
+if [ ! -d "$VENV_DIR" ]; then
+  echo "Creating virtual environment in $VENV_DIR..."
+  python3.10 -m venv "$VENV_DIR"
+  source "$VENV_DIR/bin/activate"
+  
+  # Install appropriate PyTorch based on GPU vendor
+  case "$GPU_VENDOR" in
+    "nvidia")
+      echo "Installing PyTorch with CUDA support for NVIDIA GPU..."
+      pip3 install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
+      ;;
+    "amd")
+      echo "Installing PyTorch with ROCm support for AMD GPU..."
+      pip install torch --extra-index-url https://download.pytorch.org/whl/rocm5.2/
+      ;;
+    *)
+      echo "Installing CPU-only PyTorch..."
+      pip3 install torch==2.1.2 torchvision==0.16.2
+      ;;
+  esac
+  
+  pip install --upgrade pip
+  pip install iopaint
+  echo "$GPU_VENDOR" > "$LAST_GPU_VENDOR_FILE"
+  deactivate
+
+else
+  echo "Virtual environment already exists: $VENV_DIR"
+fi
+
+    # Install plugin dependencies if needed
+    if [ "$ENABLE_REMOVE_BG" = true ] || [ "$ENABLE_ANIME_SEG" = true ] || [ "$ENABLE_INTERACTIVE_SEG" = true ]; then
+    source "$VENV_DIR/bin/activate"
+        echo "Installing plugin dependencies (onnxruntime, rembg)..."
+        pip install onnxruntime rembg
+        deactivate
+    fi
+
+# Step 5: Present user options, launch iopaint accordingly
+echo "Choose mode:"
+echo "1) Start IOPaint server"
+echo "2) Start web config interface"
+echo "3) Edit user configuration file"
+read -p "Enter choice [1/2/3]: " mode_choice
+
+if [ "$mode_choice" = "3" ]; then
+  ${EDITOR:-nano} "$USER_CONFIG"
+  exit 0
+fi
+
+CONFIG_FILE="${CONFIG_DIR}/config.json"
+mkdir -p "$(dirname "$CONFIG_FILE")"
+
+# Step 6: Run IOPaint in desired mode
+source "$VENV_DIR/bin/activate"
+
+if [ "$mode_choice" = "2" ]; then
+  # Launch web config
+  iopaint start-web-config --config-file "$CONFIG_FILE"
+else
+  # Launch main server
+  CMD="iopaint start --model=\"$MODEL\" --device=\"$DEVICE\" --port=\"$PORT\" --host=\"$HOST\" --model-dir=\"$MODEL_DIR\" --quality=\"$QUALITY\""
+  [ "$IN_BROWSER" = true ] && CMD="$CMD --inbrowser"
+  [ "$LOW_MEM" = true ] && CMD="$CMD --low-mem"
+  [ "$NO_HALF" = true ] && CMD="$CMD --no-half"
+  [ "$CPU_OFFLOAD" = true ] && CMD="$CMD --cpu-offload"
+  [ "$DISABLE_NSFW_CHECKER" = true ] && CMD="$CMD --disable-nsfw-checker"
+  [ "$CPU_TEXTENCODER" = true ] && CMD="$CMD --cpu-textencoder"
+  [ "$LOCAL_FILES_ONLY" = true ] && CMD="$CMD --local-files-only"
+  [ "$ENABLE_INTERACTIVE_SEG" = true ] && CMD="$CMD --enable-interactive-seg"
+  [ "$ENABLE_REMOVE_BG" = true ] && CMD="$CMD --enable-remove-bg"
+  [ "$ENABLE_ANIME_SEG" = true ] && CMD="$CMD --enable-anime-seg"
+  [ "$ENABLE_REALESRGAN" = true ] && CMD="$CMD --enable-realesrgan"
+  [ "$ENABLE_GFPGAN" = true ] && CMD="$CMD --enable-gfpgan"
+  [ "$ENABLE_RESTOREFORMER" = true ] && CMD="$CMD --enable-restoreformer"
+  [ -n "$INTERACTIVE_SEG_MODEL" ] && CMD="$CMD --interactive-seg-model=\"$INTERACTIVE_SEG_MODEL\""
+  [ -n "$INTERACTIVE_SEG_DEVICE" ] && CMD="$CMD --interactive-seg-device=\"$INTERACTIVE_SEG_DEVICE\""
+  [ -n "$REMOVE_BG_DEVICE" ] && CMD="$CMD --remove-bg-device=\"$REMOVE_BG_DEVICE\""
+  [ -n "$REMOVE_BG_MODEL" ] && CMD="$CMD --remove-bg-model=\"$REMOVE_BG_MODEL\""
+  [ -n "$REALESRGAN_DEVICE" ] && CMD="$CMD --realesrgan-device=\"$REALESRGAN_DEVICE\""
+  [ -n "$REALESRGAN_MODEL" ] && CMD="$CMD --realesrgan-model=\"$REALESRGAN_MODEL\""
+  [ -n "$GFPGAN_DEVICE" ] && CMD="$CMD --gfpgan-device=\"$GFPGAN_DEVICE\""
+  [ -n "$RESTOREFORMER_DEVICE" ] && CMD="$CMD --restoreformer-device=\"$RESTOREFORMER_DEVICE\""
+  [ -n "$INPUT" ] && CMD="$CMD --input=\"$INPUT\""
+  [ -n "$MASK_DIR" ] && CMD="$CMD --mask-dir=\"$MASK_DIR\""
+  [ -n "$OUTPUT_DIR" ] && CMD="$CMD --output-dir=\"$OUTPUT_DIR\""
+  echo "Starting IOPaint with the following command:"
+  echo "$CMD"
+  eval "$CMD"
+fi
+
+deactivate
