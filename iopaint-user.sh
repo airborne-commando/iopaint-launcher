@@ -18,7 +18,7 @@ HOST="127.0.0.1"
 # Model settings
 MODEL="lama"
 MODEL_DIR="${HOME}/.cache"
-DEVICE="cpu"  # cpu, cpu, or mps
+DEVICE="cpu"  # cpu, gpu, or mps
 QUALITY=100
 
 # Memory/performance settings

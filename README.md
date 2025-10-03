@@ -20,7 +20,7 @@ To install requirements for plugins do the following after running the script:
 
     source ${HOME}/.iopaint_venv/bin/activate && pip3 install onnxruntime rembg && deactivate
 
-#  Troubleshooting 
+# Troubleshooting
 
 ## Nvidia
 
@@ -36,6 +36,12 @@ Remember to delete the venv before switching devices; read below.
 ## to remove the venv CAUTION! points to home $DIR:
 
     sudo rm -r ${HOME}/.iopaint_venv
+
+then
+
+    python3.10 -m venv ${HOME}/.iopaint_venv
+
+be sure you've set your python env to 3.10
 
 # If moving to /usr/bin
 
